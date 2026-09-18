@@ -1,1 +1,1 @@
-# Kayleigh-Mann-s-XD-Prompt-Library
+# Kayleigh-Mann-XD-Prompt-Library
