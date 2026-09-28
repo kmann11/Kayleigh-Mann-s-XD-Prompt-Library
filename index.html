@@ -777,6 +777,46 @@
 </div>
 <div class="toast" id="toast"></div>
 <script>
+// Analytics configuration. Create a free site at https://www.goatcounter.com/signup,
+// then set this to the subdomain only (for example: 'kayleigh-prompts').
+var GOATCOUNTER_SITE_CODE = '';
+var usageEventQueue = [];
+var lastTrackedSearch = '';
+function usageSlug(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80) || 'unknown';
+}
+function trackUsage(path, title) {
+  if (!GOATCOUNTER_SITE_CODE || navigator.doNotTrack === '1') return;
+  var event = { path: 'event/' + path, title: title, event: true };
+  if (window.goatcounter && typeof window.goatcounter.count === 'function') window.goatcounter.count(event);
+  else usageEventQueue.push(event);
+}
+function trackPromptUsage(action, prompt) {
+  if (!prompt) return;
+  var key = prompt.custom ? 'custom' : usageSlug(prompt.title);
+  var label = prompt.custom ? 'Custom prompt' : prompt.title;
+  trackUsage(action + '/' + usageSlug(prompt.cat) + '/' + key, action.replace(/-/g, ' ') + ': ' + label);
+}
+function trackSearchUsage() {
+  var normalized = normalizeText(searchQuery);
+  if (normalized.length < 2 || normalized === lastTrackedSearch) return;
+  lastTrackedSearch = normalized;
+  var bucket = currentResults.length === 0 ? '0' : currentResults.length <= 5 ? '1-5' : currentResults.length <= 25 ? '6-25' : '26-plus';
+  var scope = activeCat === 'all' ? 'all' : usageSlug(activeCat);
+  trackUsage('search/' + scope + '/results-' + bucket, 'Search (' + categoryLabel(activeCat) + ', ' + bucket + ' results)');
+}
+function initUsageAnalytics() {
+  if (!GOATCOUNTER_SITE_CODE || navigator.doNotTrack === '1') return;
+  var script = document.createElement('script');
+  script.async = true;
+  script.src = 'https://gc.zgo.at/count.js';
+  script.dataset.goatcounter = 'https://' + GOATCOUNTER_SITE_CODE + '.goatcounter.com/count';
+  script.onload = function() {
+    if (!window.goatcounter || typeof window.goatcounter.count !== 'function') return;
+    usageEventQueue.splice(0).forEach(function(event) { window.goatcounter.count(event); });
+  };
+  document.head.appendChild(script);
+}
 var promptSpecs = {
   research: [
     [null,'Sharpen research questions','Turn a fuzzy topic into decision-ready questions.','I want to understand [topic]. Turn this into 3 specific research questions that are answerable through user research and connected to a decision about [decision]. For each question, explain what evidence would answer it and what decision it would inform.'],
@@ -2661,6 +2701,7 @@ function setActiveCategory(cat) {
     t.setAttribute('aria-selected', isActive ? 'true' : 'false');
   });
   document.getElementById('library-layout').dataset.activeCat = cat;
+  trackUsage('discipline/' + usageSlug(cat), 'View discipline: ' + categoryLabel(cat));
 }
 var categoryLabels = {
   all: 'Home',
@@ -3919,6 +3960,7 @@ function handleCopy(e) {
     var toastMsg = relatedPromptTitle(prompt) ? 'Copied. Related: ' + relatedPromptTitle(prompt) : 'Copied';
     showToast(toastMsg);
     announceToSR('Prompt copied to clipboard.');
+    trackPromptUsage('prompt-copy', prompt);
     setTimeout(function() { btn.innerHTML = COPY_ICON + ' Copy'; btn.classList.remove('copied'); }, 2500);
   });
 }
@@ -3963,6 +4005,7 @@ function submitPromptEditor() {
   var saved = upsertCustomPrompt({ title: title, desc: desc, prompt: body, cat: cat }, editingCustomId);
   if (!saved) { showToast('Could not save prompt'); return; }
   var wasEdit = !!editingCustomId;
+  trackUsage(wasEdit ? 'custom-prompt/update' : 'custom-prompt/create', wasEdit ? 'Update custom prompt' : 'Create custom prompt');
   closePromptEditor();
   searchQuery = '';
   syncSearchInputs();
@@ -3975,6 +4018,7 @@ function confirmDeleteCustomPrompt() {
   var prompt = findPromptById(editingCustomId);
   if (!prompt) return;
   if (!window.confirm('Delete “' + prompt.title + '” from this browser? This cannot be undone.')) return;
+  trackUsage('custom-prompt/delete', 'Delete custom prompt');
   deleteCustomPrompt(prompt);
   closePromptEditor();
   showToast('Prompt deleted');
@@ -3985,6 +4029,7 @@ function toggleSave(prompt) {
   if (savedIndex === -1) {
     savedPromptIds.unshift(prompt.id);
     showToast('Saved');
+    trackPromptUsage('prompt-save', prompt);
   } else {
     savedPromptIds.splice(savedIndex, 1);
     Object.keys(promptCollections).forEach(function(name) {
@@ -3992,6 +4037,7 @@ function toggleSave(prompt) {
     });
     delete promptNotes[prompt.id];
     showToast('Removed from saved');
+    trackPromptUsage('prompt-unsave', prompt);
   }
   persistSavedPrompts();
   persistCollections();
@@ -4009,6 +4055,7 @@ function renderSaveViewControl() {
 function setViewMode(mode) {
   viewMode = mode;
   storageSet('xdPromptLibraryViewMode', viewMode);
+  trackUsage('view-mode/' + usageSlug(mode), 'View mode: ' + mode);
   render();
 }
 function closeAutocomplete() {
@@ -4100,6 +4147,7 @@ function recordSearch() {
   searchHistory = [value].concat(searchHistory.filter(function(item) { return item !== value; })).slice(0, 5);
   persistSearchHistory();
   renderSearchAssists();
+  trackSearchUsage();
 }
 function applySearch(value) {
   searchQuery = value;
@@ -4434,6 +4482,7 @@ document.getElementById('modal-copy').addEventListener('click', function() {
     recordSearch();
     showToast(relatedPromptTitle(modalPrompt) ? 'Copied. Related: ' + relatedPromptTitle(modalPrompt) : 'Prompt copied');
     announceToSR('Prompt copied to clipboard.');
+    trackPromptUsage('prompt-copy', modalPrompt);
     btn.textContent = '✓ Copied';
     btn.classList.add('copied');
     setTimeout(function() { btn.textContent = 'Copy prompt'; btn.classList.remove('copied'); }, 2500);
@@ -4508,6 +4557,7 @@ document.addEventListener('keydown', function(e) {
   }
 });
 // Restore last section for return users (skip 'saved' as it needs context)
+initUsageAnalytics();
 (function() {
   var lastCat = storageGet('xdPromptLibraryLastCat', 'all');
   var validCats = ['all', 'research', 'content', 'advocacy', 'design', 'general', 'saved'];
